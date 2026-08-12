@@ -1,0 +1,198 @@
+openapi: 3.0.3
+info:
+  title: Cash Flow Control - Command Service
+  description: >
+    Write side of Solution A (Event Sourcing + CQRS). Validates and appends
+    ledger entries to the event store, publishes credit/debit events to Kafka
+    (ledger.credit-debit.events). See Appendix F.2 of the Cash-Flow
+    Architecture Report. Runs locally on port 8081.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8081
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Local-development-only token issuance (stands in for Amazon Cognito)
+  - name: Commands
+    description: Write side - append ledger entries
+
+paths:
+  /auth/token:
+    post:
+      tags: [Auth]
+      summary: Issue a local JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: demo
+              password: demo123
+      responses:
+        '200':
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Invalid username or password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /commands/entries:
+    post:
+      tags: [Commands]
+      summary: Post a credit or debit entry
+      description: >
+        Appends an event to the event store and publishes it to Kafka.
+        Idempotent on idempotencyKey - resending the same key returns 409
+        with the original entryId instead of creating a duplicate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntryRequest'
+            example:
+              accountId: acc-10293847
+              amount: 1250.00
+              currency: USD
+              type: CREDIT
+              channel: WEB
+              description: Wire transfer received
+              idempotencyKey: 6b1f7a2e-2e3b-4c9a-9c2e-1a2b3c4d5e6f
+      responses:
+        '202':
+          description: Entry accepted and event appended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntryAcceptedResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid JWT
+        '409':
+          description: idempotencyKey already used
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unknown or inactive account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /commands/entries/{entryId}/status:
+    get:
+      tags: [Commands]
+      summary: Check whether an entry was accepted
+      parameters:
+        - name: entryId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Entry found in the event store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntryStatusResponse'
+        '401':
+          description: Missing or invalid JWT
+        '404':
+          description: No event found for this entryId
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Obtain a token from POST /auth/token (demo/demo123).
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+
+    TokenResponse:
+      type: object
+      properties:
+        tokenType: { type: string, example: Bearer }
+        accessToken: { type: string }
+        expiresInSeconds: { type: integer, format: int64 }
+
+    EntryRequest:
+      type: object
+      required: [accountId, amount, currency, type, channel, idempotencyKey]
+      properties:
+        accountId: { type: string }
+        amount: { type: number, format: decimal, minimum: 0.01 }
+        currency: { type: string, minLength: 3, maxLength: 3, example: USD }
+        type: { $ref: '#/components/schemas/EntryType' }
+        channel: { type: string, example: WEB }
+        description: { type: string, maxLength: 140 }
+        idempotencyKey: { type: string, format: uuid }
+
+    EntryType:
+      type: string
+      enum: [CREDIT, DEBIT]
+
+    EntryAcceptedResponse:
+      type: object
+      properties:
+        entryId: { type: string }
+        accountId: { type: string }
+        eventId: { type: string, format: uuid }
+        status: { type: string, example: ACCEPTED }
+        acceptedAt: { type: string, format: date-time }
+
+    EntryStatusResponse:
+      type: object
+      properties:
+        entryId: { type: string }
+        status: { type: string, example: ACCEPTED }
+        postedAt: { type: string, format: date-time }
+
+    ErrorBody:
+      type: object
+      properties:
+        code: { type: string, example: VALIDATION_ERROR }
+        message: { type: string }
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              reason: { type: string }
+
+    ErrorResponse:
+      type: object
+      properties:
+        error: { $ref: '#/components/schemas/ErrorBody' }
+        timestamp: { type: string, format: date-time }
+        path: { type: string }
+        entryId:
+          type: string
+          nullable: true
+          description: Populated only on 409 Conflict (idempotency replay)

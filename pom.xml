@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.cashflow.ledger</groupId>
+  <artifactId>cash-flow-solution-a</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+  <name>Cash Flow Control - Solution A (Event Sourcing + CQRS on AWS)</name>
+  <description>
+    Companion source code for Appendix D/F of the Cash-Flow Architecture Report:
+    four Spring Boot microservices (Command, Query, Event Handler, Reporting)
+    implementing Solution A, configured to run against Kafka, PostgreSQL and
+    Redis on localhost.
+  </description>
+
+  <modules>
+    <module>command-service</module>
+    <module>query-service</module>
+    <module>event-handler-service</module>
+    <module>reporting-service</module>
+  </modules>
+
+  <properties>
+    <java.version>17</java.version>
+    <spring-boot.version>3.2.5</spring-boot.version>
+    <jjwt.version>0.12.5</jjwt.version>
+  </properties>
+
+</project>

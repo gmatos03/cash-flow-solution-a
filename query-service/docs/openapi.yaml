@@ -1,0 +1,193 @@
+openapi: 3.0.3
+info:
+  title: Cash Flow Control - Query Service
+  description: >
+    Read side of Solution A (Event Sourcing + CQRS). Serves balances,
+    statements, and daily cash-flow logs from the projected read model, with
+    a Redis cache-aside layer. See Appendix F.3 / F.8 of the Cash-Flow
+    Architecture Report. Runs locally on port 8082.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8082
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Local-development-only token issuance (stands in for Amazon Cognito)
+  - name: Queries
+    description: Read side - balances, statements, daily logs
+
+paths:
+  /auth/token:
+    post:
+      tags: [Auth]
+      summary: Issue a local JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: demo
+              password: demo123
+      responses:
+        '200':
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Invalid username or password
+
+  /queries/accounts/{accountId}/balance:
+    get:
+      tags: [Queries]
+      summary: Get the current balance for an account
+      description: >
+        Cache-aside read: checks Redis first (source=cache); on a miss reads
+        the projected accounts table and populates the cache (source=db).
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceResponse'
+        '401':
+          description: Missing or invalid JWT
+        '404':
+          description: Account not found
+
+  /queries/accounts/{accountId}/statement:
+    get:
+      tags: [Queries]
+      summary: Get a paginated statement for a date range
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: page
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Statement page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatementResponse'
+        '401':
+          description: Missing or invalid JWT
+
+  /queries/accounts/{accountId}/daily-log/{date}:
+    get:
+      tags: [Queries]
+      summary: Get the aggregated daily cash-flow log for one business day
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Daily cash-flow log entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyCashFlowLogResponse'
+        '401':
+          description: Missing or invalid JWT
+        '404':
+          description: No log for this account/date (reporting-service has not run yet)
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Obtain a token from POST /auth/token (demo/demo123).
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+
+    TokenResponse:
+      type: object
+      properties:
+        tokenType: { type: string, example: Bearer }
+        accessToken: { type: string }
+        expiresInSeconds: { type: integer, format: int64 }
+
+    BalanceResponse:
+      type: object
+      properties:
+        accountId: { type: string }
+        currentBalance: { type: number, format: decimal }
+        currency: { type: string }
+        asOf: { type: string, format: date-time }
+        source:
+          type: string
+          enum: [db, cache]
+          description: Whether this read was served from Postgres or Redis
+
+    StatementEntryDto:
+      type: object
+      properties:
+        entryId: { type: string }
+        type: { type: string, enum: [CREDIT, DEBIT] }
+        amount: { type: number, format: decimal }
+        currency: { type: string }
+        postedAt: { type: string, format: date-time }
+        description: { type: string }
+
+    StatementResponse:
+      type: object
+      properties:
+        accountId: { type: string }
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatementEntryDto'
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+
+    DailyCashFlowLogResponse:
+      type: object
+      properties:
+        accountId: { type: string }
+        reportDate: { type: string, format: date }
+        openingBalance: { type: number, format: decimal }
+        totalCredits: { type: number, format: decimal }
+        totalDebits: { type: number, format: decimal }
+        closingBalance: { type: number, format: decimal }
+        reconciliationStatus: { type: string, example: BALANCED }

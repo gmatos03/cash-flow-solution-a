@@ -1,0 +1,99 @@
+openapi: 3.0.3
+info:
+  title: Cash Flow Control - Reporting Service
+  description: >
+    Batch aggregation side of Solution A. Builds the daily cash-flow log by
+    aggregating ledger_entries, upserting daily_cash_flow_log, and rendering
+    CSV/PDF reports locally under ./reports. Runs on a nightly schedule
+    (23:00 UTC) and on demand. See Appendix F.7. Runs locally on port 8084.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8084
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Local-development-only token issuance (stands in for Amazon Cognito)
+  - name: Reports
+    description: On-demand trigger for the daily cash-flow log job
+
+paths:
+  /auth/token:
+    post:
+      tags: [Auth]
+      summary: Issue a local JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: demo
+              password: demo123
+      responses:
+        '200':
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Invalid username or password
+
+  /reports/run:
+    post:
+      tags: [Reports]
+      summary: Run the daily cash-flow log job on demand
+      description: >
+        Equivalent of the scheduled run, useful for local testing without
+        waiting for the cron trigger. Iterates every account, aggregates
+        credits/debits for the date, upserts daily_cash_flow_log, and writes
+        report.csv / report.pdf to ./reports/{accountId}/{date}/. Failures
+        for individual accounts are logged and skipped; the job continues.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Business date to report on (ISO-8601). Defaults to today (UTC).
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Run summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportRunResponse'
+        '401':
+          description: Missing or invalid JWT
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Obtain a token from POST /auth/token (demo/demo123).
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+
+    TokenResponse:
+      type: object
+      properties:
+        tokenType: { type: string, example: Bearer }
+        accessToken: { type: string }
+        expiresInSeconds: { type: integer, format: int64 }
+
+    ReportRunResponse:
+      type: object
+      properties:
+        reportDate: { type: string, format: date }
+        accountsProcessed: { type: integer }
+        completedAt: { type: string, format: date-time }

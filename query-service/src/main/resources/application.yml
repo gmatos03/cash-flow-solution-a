@@ -1,0 +1,50 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: query-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/cashflow
+    username: cashflow
+    password: cashflow
+    hikari:
+      maximum-pool-size: 10
+      pool-name: query-service-pool
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+  flyway:
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+
+app:
+  jwt:
+    secret: "local-dev-only-shared-secret-please-change-me-32B"
+    expiration-seconds: 3600
+  cache:
+    balance-ttl-seconds: 300
+    statement-ttl-seconds: 60
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    com.cashflow.ledger: INFO
